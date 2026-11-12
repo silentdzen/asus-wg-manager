@@ -1,5 +1,5 @@
 #!/bin/sh
-# ASUS WireGuard Client Manager v2.14.1 (GitHub self-update and rollback)
+# ASUS WireGuard Client Manager v2.14.2 (GitHub self-update and rollback)
 # Manages ASUS WireGuard SERVER 1 (wgs1): GUI slots 1-10 + unlimited custom peers.
 # Requires /jffs/scripts support. Run locally on router as administrator/root.
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
@@ -14,7 +14,7 @@ export LC_ALL=C
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/opt/sbin${PATH:+:$PATH}
 export PATH
 # Bump this version for every published release. GitHub Actions reads it.
-WG_MANAGER_VERSION=2.14.1
+WG_MANAGER_VERSION=2.14.2
 # Project owner for release discovery (adjust only if repository owner differs).
 UPDATE_REPO=silentdzen/asus-wg-manager
 IFACE=wgs1
@@ -1780,8 +1780,43 @@ update_apply_file() {
   rmdir "$ua_dir" 2>/dev/null || :
   return 0
 }
+# SHA-256 tools differ between ASUSWRT-Merlin models: some have no
+# sha256sum executable, but do have a BusyBox applet or firmware OpenSSL.
+# Never downgrade to MD5/SHA-1 or skip checksum verification.
+update_normalize_sha256() {
+  uns_hash=$1
+  [ "${#uns_hash}" -eq 64 ] || return 1
+  case "$uns_hash" in *[!0123456789abcdefABCDEF]*) return 1;; esac
+  printf '%s\n' "$uns_hash" | tr 'ABCDEF' 'abcdef'
+}
+update_file_sha256() {
+  ufs_file=$1
+  [ -f "$ufs_file" ] || return 1
+  if has_bin sha256sum; then
+    ufs_output=$(sha256sum "$ufs_file" 2>/dev/null) && {
+      ufs_hash=${ufs_output%% *}
+      update_normalize_sha256 "$ufs_hash" && return 0
+    }
+  fi
+  if has_bin busybox; then
+    ufs_output=$(busybox sha256sum "$ufs_file" 2>/dev/null) && {
+      ufs_hash=${ufs_output%% *}
+      update_normalize_sha256 "$ufs_hash" && return 0
+    }
+  fi
+  if has_bin openssl; then
+    ufs_output=$(openssl dgst -sha256 "$ufs_file" 2>/dev/null) && {
+      ufs_hash=${ufs_output##* }
+      update_normalize_sha256 "$ufs_hash" && return 0
+    }
+  fi
+  return 1
+}
 update_install() {
-  has_bin sha256sum || { err 'sha256sum is required to verify downloaded updates.'; return 1; }
+  update_file_sha256 "$SELF" >/dev/null || {
+    err 'No working SHA-256 verifier found (sha256sum, BusyBox or OpenSSL required).'
+    return 1
+  }
   warning 'A new release will replace the manager script, not router or client data.'
   # Always perform a fresh release check immediately before installation.
   ui_heading 'Checking GitHub for the latest stable release...'
@@ -1810,8 +1845,15 @@ update_install() {
     err 'Download failed. Installed script is unchanged.'
     rm -rf "$ud_temp"; return 1
   fi
-  ud_actual=$(sha256sum "$ud_temp/wg-manager.sh" | awk '{print $1}')
-  if [ "$ud_actual" != "$ud_hash" ]; then
+  ud_actual=$(update_file_sha256 "$ud_temp/wg-manager.sh") || {
+    err 'SHA-256 verification failed: no working verifier. Update cancelled.'
+    rm -rf "$ud_temp"; return 1
+  }
+  ud_expected=$(update_normalize_sha256 "$ud_hash") || {
+    err 'Invalid SHA-256 digest in release manifest. Update cancelled.'
+    rm -rf "$ud_temp"; return 1
+  }
+  if [ "$ud_actual" != "$ud_expected" ]; then
     err 'SHA-256 mismatch. Update cancelled.'
     rm -rf "$ud_temp"; return 1
   fi
