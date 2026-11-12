@@ -10,46 +10,15 @@ syntactically with POSIX `sh` and BusyBox `ash` outside the router; live testing
 on your router is recommended. No Entware required; the updater needs `curl`
 and `sha256sum` from the firmware.
 
-## Browser-based publishing
-
-1. Create public repository `asus-wg-manager` on GitHub (default branch: `main`).
-2. Upload `wg-manager.sh`, `README.md`, `README-CHANGELOG.txt`, `LICENSE`,
-   and `NOTICE` to its root.
-3. Create the workflow file at `.github/workflows/release.yml`, using the exact
-   contents supplied with this package.
-4. Open **Actions → Publish WG Manager release → Run workflow** (branch `main`)
-   to create the initial v2.14.0 Release. Later script uploads to `main` will
-   trigger a release automatically when `WG_MANAGER_VERSION` increases.
-5. Confirm that `Releases` shows an asset called `update-info.txt` and a script
-   asset named exactly `wg-manager.sh`. Enable release immutability under
-   **Settings → General → Releases** for subsequent releases if available.
-
-**Every new release**: Upload the new `wg-manager.sh` and matching
-`README-CHANGELOG.txt` through **Add file → Upload files** on GitHub.com and
-commit to `main`. The script must have a new `WG_MANAGER_VERSION=X.Y.Z`
-assignment, and the changelog must mention `vX.Y.Z`. The workflow validates,
-checks the version is newer than the latest release, generates `update-info.txt`
-with the SHA-256 digest, produces a ZIP, and publishes the GitHub release.
-Never upload WireGuard peer keys, `.conf` exports, or router backups publicly.
-
-The updater currently points to `silentdzen/asus-wg-manager`:
-
-```sh
-UPDATE_REPO=silentdzen/asus-wg-manager
-```
-
-If your GitHub account has a different owner name, edit this line in
-`wg-manager.sh` **before** uploading it or distributing it to your routers.
-
 ## Initial router installation (manual, once)
 
 Upload the script as `wg-manager.sh` to `/jffs/wg-manager.sh`, then check its
 syntax, preserve a copy of the previous executable and move the new file into
-`/jffs/scripts/wg-manager.sh`. SSH port 99 is used in the following example.
+`/jffs/scripts/wg-manager.sh`. SSH port 22 is used in the following example.
 
 ```sh
-scp -O -P 99 wg-manager.sh USERNAME@ROUTER_HOST:/jffs/wg-manager.sh
-ssh -p 99 USERNAME@ROUTER_HOST 'sh -n /jffs/wg-manager.sh && cp -p /jffs/scripts/wg-manager.sh /jffs/scripts/wg-manager.sh.bak && chmod 700 /jffs/wg-manager.sh && mv /jffs/wg-manager.sh /jffs/scripts/wg-manager.sh'
+scp -O -P 22 wg-manager.sh USERNAME@ROUTER_HOST:/jffs/wg-manager.sh
+ssh -p 22 USERNAME@ROUTER_HOST 'sh -n /jffs/wg-manager.sh && cp -p /jffs/scripts/wg-manager.sh /jffs/scripts/wg-manager.sh.bak && chmod 700 /jffs/wg-manager.sh && mv /jffs/wg-manager.sh /jffs/scripts/wg-manager.sh'
 ```
 
 ## Security and update behaviour
@@ -61,8 +30,6 @@ ssh -p 99 USERNAME@ROUTER_HOST 'sh -n /jffs/wg-manager.sh && cp -p /jffs/scripts
   executable under `/jffs/wg-manager/backups/updates/`, then replaces it.
 - Rollback restores only the executable; client keys, LAN policies and
   connection-history data are never modified by updates/rollbacks.
-- Enabling GitHub **immutable releases** helps protect published assets.
-  A SHA-256 checksum from the same publisher is not an independent signature.
 - Keep full, offline router configuration backups as a separate precaution.
 
 ## Licence and commercial permissions
