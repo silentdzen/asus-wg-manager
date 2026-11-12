@@ -1,5 +1,5 @@
 #!/bin/sh
-# ASUS WireGuard Client Manager v2.14.0 (GitHub self-update and rollback)
+# ASUS WireGuard Client Manager v2.14.1 (GitHub self-update and rollback)
 # Manages ASUS WireGuard SERVER 1 (wgs1): GUI slots 1-10 + unlimited custom peers.
 # Requires /jffs/scripts support. Run locally on router as administrator/root.
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
@@ -14,7 +14,7 @@ export LC_ALL=C
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/opt/sbin${PATH:+:$PATH}
 export PATH
 # Bump this version for every published release. GitHub Actions reads it.
-WG_MANAGER_VERSION=2.14.0
+WG_MANAGER_VERSION=2.14.1
 # Project owner for release discovery (adjust only if repository owner differs).
 UPDATE_REPO=silentdzen/asus-wg-manager
 IFACE=wgs1
