@@ -1,0 +1,111 @@
+name: Publish WG Manager release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - wg-manager.sh
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wg-manager-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate script and extract version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n wg-manager.sh
+          bash -n wg-manager.sh
+          version="$(sed -n 's/^WG_MANAGER_VERSION=//p' wg-manager.sh)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::Expected exactly one WG_MANAGER_VERSION=X.Y.Z assignment.'
+            exit 1
+          fi
+          if [[ "$(grep -c '^WG_MANAGER_VERSION=' wg-manager.sh)" != 1 ]]; then
+            echo '::error::Duplicate version assignment.'
+            exit 1
+          fi
+          if ! grep -Fq "v${version}" README-CHANGELOG.txt; then
+            echo '::error::README-CHANGELOG.txt must describe the version being released.'
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check that release version is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+              echo 'Version already released; manual rerun does not overwrite it.'
+              echo 'PUBLISH=false' >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "::error::v${VERSION} already exists. Bump WG_MANAGER_VERSION before uploading a revised script."
+            exit 1
+          fi
+          old="$(gh release view --json tagName --jq '.tagName' 2>/dev/null || true)"
+          if [[ -n "$old" ]]; then
+            python3 - "$VERSION" "${old#v}" <<'PY'
+          import sys
+          try:
+              current = tuple(int(x) for x in sys.argv[1].split('.'))
+              previous = tuple(int(x) for x in sys.argv[2].split('.'))
+              if len(current) != 3 or len(previous) != 3 or current <= previous:
+                  raise ValueError('Release must increase the numeric version')
+          except (ValueError, IndexError) as exc:
+              sys.exit(f'New version must be greater than latest published release: {exc}')
+          PY
+          fi
+          echo 'PUBLISH=true' >> "$GITHUB_ENV"
+
+      - name: Package release assets
+        if: env.PUBLISH == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp wg-manager.sh README-CHANGELOG.txt dist/
+          hash="$(sha256sum dist/wg-manager.sh | awk '{print $1}')"
+          printf 'VERSION=%s\nSHA256=%s\n' "$VERSION" "$hash" > dist/update-info.txt
+          (cd dist && zip -q "WG-Manager-v${VERSION}.zip" wg-manager.sh README-CHANGELOG.txt update-info.txt)
+          sha256sum dist/wg-manager.sh
+          cat dist/update-info.txt
+
+      - name: Publish GitHub Release
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "v${VERSION}" \
+            "dist/wg-manager.sh" \
+            "dist/update-info.txt" \
+            "dist/README-CHANGELOG.txt" \
+            "dist/WG-Manager-v${VERSION}.zip" \
+            --target "$GITHUB_SHA" \
+            --title "WG Manager v${VERSION}" \
+            --notes-file README-CHANGELOG.txt \
+            --latest
