@@ -1,5 +1,5 @@
 #!/bin/sh
-# ASUS WireGuard Client Manager v2.14.2 (GitHub self-update and rollback)
+# ASUS WireGuard Client Manager v2.14.3 (submenu navigation refinement)
 # Manages ASUS WireGuard SERVER 1 (wgs1): GUI slots 1-10 + unlimited custom peers.
 # Requires /jffs/scripts support. Run locally on router as administrator/root.
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
@@ -14,7 +14,7 @@ export LC_ALL=C
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/opt/sbin${PATH:+:$PATH}
 export PATH
 # Bump this version for every published release. GitHub Actions reads it.
-WG_MANAGER_VERSION=2.14.2
+WG_MANAGER_VERSION=2.14.3
 # Project owner for release discovery (adjust only if repository owner differs).
 UPDATE_REPO=silentdzen/asus-wg-manager
 IFACE=wgs1
@@ -1321,8 +1321,7 @@ connection_status() {
     printf '\n'
     ui_menu_item 1 'Refresh connection status'
     ui_menu_item 2 'Clear saved connection history'
-    ui_menu_item 3 'Back to main menu'
-    ask 'Select [1-3]: '
+    ask 'Select [1-2, m = menu]: '
     case "$ANSWER" in
       1) : ;;
       2)
@@ -1336,8 +1335,8 @@ connection_status() {
           say 'Saved history cleared. Pre-clear handshakes and endpoints are now hidden.'
           say 'New handshakes and traffic will be recorded from this point forward.'
         fi ;;
-      3|m|M) return 2 ;;
-      *) err 'Select 1, 2 or 3.' ;;
+      m|M) return 2 ;;
+      *) err 'Select 1, 2 or m.' ;;
     esac
   done
 }
@@ -1614,8 +1613,7 @@ backup_restore_menu() {
     ui_heading 'Backup and restore (wgs1)'
     ui_menu_item 1 'Create backup archive'
     ui_menu_item 2 'Restore from backup archive'
-    ui_menu_item 3 'Back to main menu'
-    ask 'Select [1-3]: '
+    ask 'Select [1-2, m = menu]: '
     case "$ANSWER" in
       1) backup_menu; return $?;;
       2)
@@ -1627,8 +1625,8 @@ backup_restore_menu() {
         is_back "$ANSWER" && return 2
         case "$ANSWER" in /*) restore_archive "$ANSWER"; return $?;;
           *) err 'Enter an absolute archive path.'; return 1;; esac;;
-      3|m|M) return 2;;
-      *) err 'Select 1, 2, or 3.';;
+      m|M) return 2;;
+      *) err 'Select 1, 2 or m.';;
     esac
   done
 }
@@ -1935,14 +1933,13 @@ update_menu() {
     ui_menu_item 1 'Check installed and latest versions'
     ui_menu_item 2 'Update WG Manager'
     ui_menu_item 3 'Roll back to a previous version'
-    ui_menu_item 4 'Back to main menu'
-    ask 'Select [1-4]: '
+    ask 'Select [1-3, m = menu]: '
     case "$ANSWER" in
       1) if update_check y; then update_version_line; else warning 'Version check failed (offline or GitHub unavailable).'; fi ;;
       2) update_install || : ;;
       3) update_rollback || : ;;
-      4|m|M) return 2 ;;
-      *) err 'Select 1 through 4.' ;;
+      m|M) return 2 ;;
+      *) err 'Select 1, 2, 3 or m.' ;;
     esac
   done
 }
