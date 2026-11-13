@@ -1,5 +1,5 @@
 #!/bin/sh
-# ASUS WireGuard Client Manager v2.14.6 (compact status alignment fix)
+# ASUS WireGuard Client Manager v2.14.7 (detail and full-name alignment)
 # Manages ASUS WireGuard SERVER 1 (wgs1): GUI slots 1-10 + unlimited custom peers.
 # Requires /jffs/scripts support. Run locally on router as administrator/root.
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
@@ -14,7 +14,7 @@ export LC_ALL=C
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/opt/sbin${PATH:+:$PATH}
 export PATH
 # Bump this version for every published release. GitHub Actions reads it.
-WG_MANAGER_VERSION=2.14.6
+WG_MANAGER_VERSION=2.14.7
 # Project owner for release discovery (adjust only if repository owner differs).
 UPDATE_REPO=silentdzen/asus-wg-manager
 IFACE=wgs1
@@ -189,17 +189,53 @@ ui_wrapped_field() {
       }
     }'
 }
-ui_full_name() { ui_wrapped_field '    Full name: ' "$1" '      '; }
-# Render traffic and endpoint without horizontal overflow even with IPv6.
-# Compact mode uses a three-space indent so detail rows begin directly under
-# the client name (after the numeric ID and following space).
+# Indent full names to the same column as the client name. Compact and
+# standard client records start immediately after "ID. " (three spaces), while
+# full-width table names start after the padded ID field (four spaces).
+# The continuation follows the same indentation, not a six-space offset.
+ui_full_name() {
+  _uf_indent=${2:-'   '}
+  # Prefer breaking between words so a name such as "WAN and LAN" does not
+  # split into "WA" and "N and LAN" when the display is narrow.
+  awk -v prefix="${_uf_indent}Full name: " -v value="$1" \
+      -v indent="$_uf_indent" -v cols="$UI_COLS" '
+    BEGIN {
+      line=prefix
+      while (length(value)>0) {
+        room=cols-length(line)
+        if (room<1) room=1
+        if (length(value)<=room) { print line value; exit }
+        if (substr(value,room+1,1)==" ") {
+          print line substr(value,1,room)
+          value=substr(value,room+2)
+        } else {
+          split_at=0
+          for (i=room; i>1; i--) {
+            if (substr(value,i,1)==" ") { split_at=i; break }
+          }
+          if (split_at>1) {
+            print line substr(value,1,split_at-1)
+            value=substr(value,split_at+1)
+          } else {
+            print line substr(value,1,room)
+            value=substr(value,room+1)
+          }
+        }
+        line=indent
+      }
+    }'
+}
+# Render traffic and endpoint without horizontal overflow, including IPv6.
+# Grouped records align with the name after "ID. "; a 1-digit ID needs 3
+# spaces, a 2-digit ID needs 4, etc. Desktop-wide details retain 4 spaces.
 ui_connection_detail() {
-  if [ "$UI_MODE" = compact ]; then
-    if [ $(( ${#1} + ${#2} + 18 )) -le "$UI_COLS" ]; then
-      printf '   %s | Endpoint: %s\n' "$1" "$2"
+  if [ "$UI_MODE" = compact ] || [ "$UI_MODE" = standard ]; then
+    _wgm_indent=${3:-'   '}
+    if [ $(( ${#1} + ${#2} + 15 + ${#_wgm_indent} )) -le "$UI_COLS" ]; then
+      printf '%s%s | Endpoint: %s\n' "$_wgm_indent" "$1" "$2"
     else
-      ui_wrapped_field '   ' "$1" '   '
-      ui_wrapped_field '   Endpoint: ' "$2" '     '
+      ui_wrapped_field "$_wgm_indent" "$1" "$_wgm_indent"
+      ui_wrapped_field "${_wgm_indent}Endpoint: " "$2" "$_wgm_indent"
     fi
   elif [ $(( ${#1} + ${#2} + 19 )) -le "$UI_COLS" ]; then
     printf '    %s | Endpoint: %s\n' "$1" "$2"
@@ -208,26 +244,26 @@ ui_connection_detail() {
     ui_wrapped_field '    Endpoint: ' "$2" '      '
   fi
 }
-# In the standard record layout, keep the IP and RX fields the same width.
-# This aligns the first | and the Handshake/TX columns across both lines.
-# Length calculations exclude ANSI colours, and long endpoints wrap safely.
+# Keep the two first columns equally wide in the standard layout.
 ui_connection_detail_aligned() {
+  _wgm_indent=${3:-'   '}
   case "$1" in
     'RX: '*' | TX: '*)
       _wgm_rx=${1%%' | TX: '*}
       _wgm_tx=${1#*' | TX: '}
-      _wgm_first=$(printf '    %-21s |  TX: %s' "$_wgm_rx" "$_wgm_tx")
+      _wgm_first=$(printf '%s%-21s |  TX: %s' "$_wgm_indent" "$_wgm_rx" "$_wgm_tx")
       if [ $(( ${#_wgm_first} + ${#2} + 13 )) -le "$UI_COLS" ]; then
         printf '%s | Endpoint: %s\n' "$_wgm_first" "$2"
       else
         printf '%s\n' "$_wgm_first"
-        ui_wrapped_field '    Endpoint: ' "$2" '      '
+        ui_wrapped_field "${_wgm_indent}Endpoint: " "$2" "$_wgm_indent"
       fi ;;
     *)
-      ui_wrapped_field '    ' "$1" '    '
-      ui_wrapped_field '    Endpoint: ' "$2" '      ' ;;
+      ui_wrapped_field "$_wgm_indent" "$1" "$_wgm_indent"
+      ui_wrapped_field "${_wgm_indent}Endpoint: " "$2" "$_wgm_indent" ;;
   esac
 }
+
 readfield() { sed -n "s/^$2=//p" "$1" 2>/dev/null | sed -n '1p'; }
 confval() { sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" 2>/dev/null | sed -n '1p'; }
 valid_name() { case "$1" in ''|.*|*..*|*[!a-zA-Z0-9._-]*) return 1;; *) [ ${#1} -le 40 ];; esac; }
@@ -975,17 +1011,18 @@ table_row() {
   esac
   [ "$_tr_policy" = deny ] && _tr_policy=restrict
   if [ "$UI_COLS" -lt 76 ]; then
+    _tr_indent=$(printf '%*s' "$(( ${#_tr_id} + 2 ))" '')
     _tr_limit=$(( UI_COLS - ${#_tr_id} - ${#_tr_status} - 5 ))
     [ "$_tr_limit" -ge 8 ] || _tr_limit=8
     printf '%s. %.*s  %s%s%s\n' "$_tr_id" "$_tr_limit" "$_tr_name" \
       "$_tr_colour" "$_tr_status" "${UI_RESET:-}"
-    [ "${#_tr_name}" -le "$_tr_limit" ] || ui_full_name "$_tr_name"
-    printf '   VPN IPv4: %s\n' "$_tr_ip"
-    printf '   LAN policy: %s\n' "$_tr_policy"
+    [ "${#_tr_name}" -le "$_tr_limit" ] || ui_full_name "$_tr_name" "$_tr_indent"
+    printf '%sVPN IPv4: %s\n' "$_tr_indent" "$_tr_ip"
+    printf '%sLAN policy: %s\n' "$_tr_indent" "$_tr_policy"
   else
     printf '%-3.3s %-34.34s %-15.15s ' "$_tr_id" "$_tr_name" "$_tr_ip"
     printf '%s%-8.8s%s %-10.10s\n' "$_tr_colour" "$_tr_status" "${UI_RESET:-}" "$_tr_policy"
-    [ "${#_tr_name}" -le 34 ] || ui_full_name "$_tr_name"
+    [ "${#_tr_name}" -le 34 ] || ui_full_name "$_tr_name" '    '
   fi
   ui_client_rule
 }
@@ -1369,23 +1406,24 @@ status_row() {
   fi
   case "$UI_MODE" in
     compact|standard)
+      _sr_indent=$(printf '%*s' "$(( ${#rowid} + 2 ))" '')
       _sr_limit=$(( UI_COLS - ${#rowid} - ${#state} - 5 ))
       [ "$_sr_limit" -ge 8 ] || _sr_limit=8
       [ "$_sr_limit" -le 38 ] || _sr_limit=38
       printf '%s. %s%.*s%s  %s%s%s\n' \
         "$rowid" "$field_colour" "$_sr_limit" "$rowname" "${UI_RESET:-}" \
         "$status_colour" "$state" "${UI_RESET:-}"
-      [ "${#rowname}" -le "$_sr_limit" ] || ui_full_name "$rowname"
+      [ "${#rowname}" -le "$_sr_limit" ] || ui_full_name "$rowname" "$_sr_indent"
       if [ "$UI_MODE" = compact ]; then
-        # Detail rows begin directly under the client name on narrow screens.
-        printf '   IP: %s\n' "$rowip"
-        printf '   Last handshake: %s%s%s\n' "$field_colour" "$when" "${UI_RESET:-}"
-        ui_connection_detail "$transfer" "$remote"
+        # Detail rows align with the first letter of the client name.
+        printf '%sIP: %s\n' "$_sr_indent" "$rowip"
+        printf '%sLast handshake: %s%s%s\n' "$_sr_indent" "$field_colour" "$when" "${UI_RESET:-}"
+        ui_connection_detail "$transfer" "$remote" "$_sr_indent"
       else
-        # Fixed first-column width keeps the IP/RX and | positions aligned.
-        printf '    %-21s |  Handshake: %s%s%s\n' \
-          "IP: $rowip" "$field_colour" "$when" "${UI_RESET:-}"
-        ui_connection_detail_aligned "$transfer" "$remote"
+        # Equal-width first columns align the IP/RX and | positions.
+        printf '%s%-21s |  Handshake: %s%s%s\n' \
+          "$_sr_indent" "IP: $rowip" "$field_colour" "$when" "${UI_RESET:-}"
+        ui_connection_detail_aligned "$transfer" "$remote" "$_sr_indent"
       fi
       ;;
     full)
@@ -1405,7 +1443,7 @@ status_row() {
           "$field_colour" "$when" "${UI_RESET:-}"
         ui_connection_detail "$transfer" "$remote"
       fi
-      [ "${#rowname}" -le 26 ] || ui_full_name "$rowname"
+      [ "${#rowname}" -le 26 ] || ui_full_name "$rowname" '    '
       ;;
     *)
       printf '%-3.3s %s%-26.26s%s %-15.15s %s%-10.10s%s %s%s%s\n' \
@@ -1413,7 +1451,7 @@ status_row() {
         "$rowip" \
         "$status_colour" "$state" "${UI_RESET:-}" \
         "$field_colour" "$when" "${UI_RESET:-}"
-      [ "${#rowname}" -le 26 ] || ui_full_name "$rowname"
+      [ "${#rowname}" -le 26 ] || ui_full_name "$rowname" '    '
       ui_connection_detail "$transfer" "$remote"
       ;;
   esac
