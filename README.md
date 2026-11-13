@@ -15,6 +15,9 @@ syntax, preserve a copy of the previous executable and move the new file into
 
 ```sh
 scp -O -P 22 wg-manager.sh USERNAME@ROUTER_HOST:/jffs/wg-manager.sh
+```
+
+```sh
 ssh -p 22 USERNAME@ROUTER_HOST 'sh -n /jffs/wg-manager.sh && cp -p /jffs/scripts/wg-manager.sh /jffs/scripts/wg-manager.sh.bak && chmod 700 /jffs/wg-manager.sh && mv /jffs/wg-manager.sh /jffs/scripts/wg-manager.sh'
 ```
 
