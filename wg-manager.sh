@@ -1,5 +1,5 @@
 #!/bin/sh
-# ASUS WireGuard Client Manager v2.14.4 (ASUS shell path compatibility fix)
+# ASUS WireGuard Client Manager v2.14.5 (responsive terminal interface)
 # Manages ASUS WireGuard SERVER 1 (wgs1): GUI slots 1-10 + unlimited custom peers.
 # Requires /jffs/scripts support. Run locally on router as administrator/root.
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
@@ -14,7 +14,7 @@ export LC_ALL=C
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/opt/sbin${PATH:+:$PATH}
 export PATH
 # Bump this version for every published release. GitHub Actions reads it.
-WG_MANAGER_VERSION=2.14.4
+WG_MANAGER_VERSION=2.14.5
 # Project owner for release discovery (adjust only if repository owner differs).
 UPDATE_REPO=silentdzen/asus-wg-manager
 IFACE=wgs1
@@ -75,10 +75,10 @@ make_temp_dir() {
   return 1
 }
 
-# UI colours only for an interactive, ANSI-capable terminal. Never pollute
-# output from router hooks, cron or redirected/noninteractive sessions.
+# UI colours only for interactive, ANSI-capable terminals. Never colour
+# hook output, logs or redirected sessions. 256-colour amber is optional.
 ui_init() {
-  UI_RESET='' UI_CYAN='' UI_GREEN='' UI_YELLOW='' UI_RED='' UI_GREY=''
+  UI_RESET='' UI_CYAN='' UI_GREEN='' UI_YELLOW='' UI_AMBER='' UI_RED='' UI_GREY=''
   if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR+x}" ]; then
     UI_RESET=$(printf '\033[0m')
     UI_CYAN=$(printf '\033[36m')
@@ -86,8 +86,57 @@ ui_init() {
     UI_YELLOW=$(printf '\033[33m')
     UI_RED=$(printf '\033[31m')
     UI_GREY=$(printf '\033[90m')
+    case "${TERM:-}" in
+      *256color*|*truecolor*|*24bit*) UI_AMBER=$(printf '\033[38;5;214m') ;;
+      *) UI_AMBER=$UI_YELLOW ;;
+    esac
   fi
 }
+# Refresh geometry on entry to each screen (e.g. after phone rotation).
+# Use stty when attached to a tty; COLUMNS is the fallback. No tput/Entware.
+ui_layout() {
+  UI_COLS=${COLUMNS:-80}
+  if [ -t 0 ] && [ -t 1 ]; then
+    _ui_size=$(stty size < /dev/tty 2>/dev/null) || _ui_size=''
+    case "$_ui_size" in
+      *' '*) _ui_detected=${_ui_size##* }
+             case "$_ui_detected" in ''|*[!0-9]*) :;; *)
+               [ "$_ui_detected" -gt 0 ] && UI_COLS=$_ui_detected;; esac ;;
+    esac
+  fi
+  # Explicit override for iOS SSH apps that misreport their column count:
+  # WG_MANAGER_COLUMNS=40 /jffs/scripts/wg-manager.sh
+  case "${WG_MANAGER_COLUMNS:-}" in
+    ''|*[!0-9]*) : ;;
+    *) UI_COLS=$WG_MANAGER_COLUMNS ;;
+  esac
+  case "$UI_COLS" in ''|*[!0-9]*) UI_COLS=80;; esac
+  [ "$UI_COLS" -ge 24 ] 2>/dev/null || UI_COLS=24
+  [ "$UI_COLS" -le 220 ] || UI_COLS=220
+  if [ "$UI_COLS" -lt 60 ]; then
+    UI_MODE=compact
+  elif [ "$UI_COLS" -lt 96 ]; then
+    UI_MODE=standard
+  elif [ "$UI_COLS" -lt 170 ]; then
+    UI_MODE=wide
+  else
+    UI_MODE=full
+  fi
+  UI_MENU_RULE_COLS=$UI_COLS
+  [ "$UI_MENU_RULE_COLS" -le 60 ] || UI_MENU_RULE_COLS=60
+  UI_CLIENT_RULE_COLS=$UI_COLS
+  [ "$UI_CLIENT_RULE_COLS" -le 76 ] || UI_CLIENT_RULE_COLS=76
+  UI_RULE_COLS=$UI_COLS
+  case "$UI_MODE" in full) UI_RULE_COLS=160;; wide) UI_RULE_COLS=76;; esac
+  [ "$UI_RULE_COLS" -le 76 ] || [ "$UI_MODE" = full ] || UI_RULE_COLS=76
+}
+UI_RULE_TEXT='------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------'
+ui_bar() {
+  printf '%s%.*s%s\n' "${UI_GREY:-}" "$1" "$UI_RULE_TEXT" "${UI_RESET:-}"
+}
+ui_menu_rule() { ui_bar "$UI_MENU_RULE_COLS"; }
+ui_client_rule() { ui_bar "$UI_CLIENT_RULE_COLS"; }
+ui_rule() { ui_bar "$UI_RULE_COLS"; }
 say() { printf '%s\n' "$*"; }
 err() {
   if [ -t 2 ]; then
@@ -99,21 +148,57 @@ err() {
 success() { printf '%s%s%s\n' "${UI_GREEN:-}" "$*" "${UI_RESET:-}"; }
 warning() { printf '%s%s%s\n' "${UI_YELLOW:-}" "$*" "${UI_RESET:-}"; }
 ui_heading() { printf '\n%s%s%s\n' "${UI_CYAN:-}" "$*" "${UI_RESET:-}"; }
-# 76-character rule: long enough to separate clients, safe at 80 columns.
-ui_menu_rule() {
-  printf '%s%s%s\n' "${UI_GREY:-}" \
-    '------------------------------------------------------------' "${UI_RESET:-}"
+# Wrap a word-separated menu label on compact terminals without losing its ID.
+ui_menu_item() {
+  printf '%s%s)%s ' "${UI_CYAN:-}" "$1" "${UI_RESET:-}"
+  if [ "$UI_MODE" != compact ] || [ $(( ${#2} + ${#1} + 2 )) -le "$UI_COLS" ]; then
+    printf '%s\n' "$2"
+    return
+  fi
+  printf '%s\n' "$2" | awk -v width="$UI_COLS" -v first=$(( ${#1} + 2 )) '
+    { n=split($0,a," "); line=""; used=first;
+      for(i=1;i<=n;i++) {
+        word=a[i]; if(word=="")continue;
+        extra=length(word)+(line!=""?1:0);
+        if(used+extra>width && line!="") {
+          print line; line="   " word; used=3+length(word)
+        } else {
+          line=line (line==""?"":" ") word; used+=extra
+        }
+      }
+      print line
+    }'
 }
-ui_rule() {
-  printf '%s%s%s\n' "${UI_GREY:-}" \
-    '----------------------------------------------------------------------------' "${UI_RESET:-}"
-}
-ui_menu_item() { printf '%s%s)%s %s\n' "${UI_CYAN:-}" "$1" "${UI_RESET:-}" "$2"; }
 pause() { printf '\nPress Enter to return to the main menu: '; IFS= read -r _discard || :; }
+ui_continue() { printf '\nPress Enter to continue... '; IFS= read -r _discard || :; }
 clear_screen() { if [ -t 1 ]; then printf '\033[2J\033[H'; fi; }
+ui_new_screen() { ui_layout; clear_screen; }
 is_back() { case "$1" in m|M|b|B|back|BACK) return 0;; *) return 1;; esac; }
 ask() { printf '%s%s%s' "${UI_CYAN:-}" "$1" "${UI_RESET:-}"; IFS= read -r ANSWER || exit 0; }
 yes() { case "$1" in y|Y|yes|YES) return 0;; *) return 1;; esac; }
+# Full names and long endpoints are always plain text, with safe line breaks.
+ui_wrapped_field() {
+  awk -v prefix="$1" -v value="$2" -v cols="$UI_COLS" -v indent="$3" '
+    BEGIN {
+      line=prefix;
+      if(value==""){ print line; exit }
+      while(length(value)>0){
+        room=cols-length(line); if(room<1)room=1;
+        print line substr(value,1,room);
+        value=substr(value,room+1); line=indent;
+      }
+    }'
+}
+ui_full_name() { ui_wrapped_field '    Full name: ' "$1" '      '; }
+# Render traffic and endpoint without horizontal overflow even with IPv6.
+ui_connection_detail() {
+  if [ $(( ${#1} + ${#2} + 19 )) -le "$UI_COLS" ]; then
+    printf '    %s | Endpoint: %s\n' "$1" "$2"
+  else
+    ui_wrapped_field '    ' "$1" '    '
+    ui_wrapped_field '    Endpoint: ' "$2" '      '
+  fi
+}
 readfield() { sed -n "s/^$2=//p" "$1" 2>/dev/null | sed -n '1p'; }
 confval() { sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" 2>/dev/null | sed -n '1p'; }
 valid_name() { case "$1" in ''|.*|*..*|*[!a-zA-Z0-9._-]*) return 1;; *) [ ${#1} -le 40 ];; esac; }
@@ -853,25 +938,34 @@ print_clients() {
 # sessions; print the complete name on an extra line if it exceeds 34 chars.
 # Apply colour only AFTER field padding, to avoid breaking alignment.
 table_row() {
-  printf '%-3.3s %-34.34s %-15.15s ' "$1" "$2" "$3"
-  case "$4" in
-    enabled) row_colour=${UI_GREEN:-} ;;
-    disabled) row_colour=${UI_GREY:-} ;;
-    *) row_colour=${UI_YELLOW:-} ;;
+  _tr_id=$1 _tr_name=$2 _tr_ip=$3 _tr_status=$4 _tr_policy=$5
+  case "$_tr_status" in
+    enabled) _tr_colour=${UI_GREEN:-} ;;
+    disabled) _tr_colour=${UI_GREY:-} ;;
+    *) _tr_colour=${UI_YELLOW:-} ;;
   esac
-  table_policy=$5
-  [ "$table_policy" = deny ] && table_policy=restrict
-  printf '%s%-8.8s%s %-10.10s\n' "$row_colour" "$4" "${UI_RESET:-}" "$table_policy"
-  if [ "${#2}" -gt 34 ]; then printf '    Full name: %s\n' "$2"; fi
-  ui_rule
+  [ "$_tr_policy" = deny ] && _tr_policy=restrict
+  if [ "$UI_COLS" -lt 76 ]; then
+    _tr_limit=$(( UI_COLS - ${#_tr_id} - ${#_tr_status} - 5 ))
+    [ "$_tr_limit" -ge 8 ] || _tr_limit=8
+    printf '%s. %.*s  %s%s%s\n' "$_tr_id" "$_tr_limit" "$_tr_name" \
+      "$_tr_colour" "$_tr_status" "${UI_RESET:-}"
+    [ "${#_tr_name}" -le "$_tr_limit" ] || ui_full_name "$_tr_name"
+    printf '   VPN IPv4: %s\n' "$_tr_ip"
+    printf '   LAN policy: %s\n' "$_tr_policy"
+  else
+    printf '%-3.3s %-34.34s %-15.15s ' "$_tr_id" "$_tr_name" "$_tr_ip"
+    printf '%s%-8.8s%s %-10.10s\n' "$_tr_colour" "$_tr_status" "${UI_RESET:-}" "$_tr_policy"
+    [ "${#_tr_name}" -le 34 ] || ui_full_name "$_tr_name"
+  fi
+  ui_client_rule
 }
 table_columns() {
+  [ "$UI_COLS" -ge 76 ] || return 0
   printf '%-3s %-34s %-15s %-8s %-10s\n' ID Name 'VPN IPv4' "$1" "$2"
-  ui_rule
+  ui_client_rule
 }
-print_columns() {
-  table_columns Status 'LAN policy'
-}
+print_columns() { table_columns Status 'LAN policy'; }
 select_client() {
   while :; do
     ask 'Client ID [number, m = menu]: '
@@ -1118,9 +1212,17 @@ delete_client() {
 # Each peer: one identity/status line, one traffic+endpoint line (or two
 # details lines for longer endpoints). No information is truncated.
 status_columns() {
-  printf '%-3s %-26s %-15s %-10s %s\n' \
-    'ID' 'Name' 'VPN IPv4' 'Connection' 'Last handshake'
-  ui_rule
+  case "$UI_MODE" in
+    full)
+      printf '%-3s %-26s %-15s %-10s %-16s %-31s %s\n' \
+        ID Name 'VPN IPv4' Connection 'Last handshake' 'Transfer (client)' Endpoint
+      ui_rule ;;
+    wide)
+      printf '%-3s %-26s %-15s %-10s %s\n' \
+        ID Name 'VPN IPv4' Connection 'Last handshake'
+      ui_rule ;;
+    *) : ;; # Compact/standard layouts use records instead of wide headings.
+  esac
 }
 format_transfer() {
   awk -v rx="$1" -v tx="$2" '
@@ -1225,30 +1327,65 @@ status_row() {
     disabled) STATUS_DISABLED=$((STATUS_DISABLED + 1)); status_colour=${UI_GREY:-} ;;
     *) STATUS_UNAVAILABLE=$((STATUS_UNAVAILABLE + 1)); status_colour=${UI_RED:-} ;;
   esac
-  # Recent: green name. Idle with an actual handshake <24h ago: yellow name.
-  # A stored handshake may be older than 24h; never colour it yellow merely
-  # because its connection state is 'idle'. Disabled peers keep neutral names.
-  name_colour=''
+  # Only real handshakes qualify for age-based highlighting. Never colour the
+  # optional Full name line. A recent handshake is green; an idle handshake
+  # newer than 24h is amber (256-colour 214, or yellow on basic terminals).
+  field_colour=''
   if [ "$state" = recent ]; then
-    name_colour=${UI_GREEN:-}
+    field_colour=${UI_GREEN:-}
   elif [ "$state" = idle ] && [ "$last" -gt 0 ] && [ "$last" -le "$NOW" ] &&
        [ "$((NOW - last))" -lt 86400 ]; then
-    name_colour=${UI_YELLOW:-}
+    field_colour=${UI_AMBER:-}
+    status_colour=${UI_AMBER:-}
   fi
-  printf '%-3.3s ' "$rowid"
-  printf '%s%-26.26s%s %-15.15s ' "$name_colour" "$rowname" "${UI_RESET:-}" "$rowip"
-  printf '%s%-10.10s%s %s\n' "$status_colour" "$state" "${UI_RESET:-}" "$when"
-  if [ "${#rowname}" -gt 26 ]; then
-    printf '    Full name: %s%s%s\n' "$name_colour" "$rowname" "${UI_RESET:-}"
-  fi
-  # The long IPv6 endpoint is moved onto its own line rather than wrapping
-  # against the next client's row; this preserves both endpoint and traffic.
-  if [ $(( ${#transfer} + ${#remote} + 19 )) -le 76 ]; then
-    printf '    %s | Endpoint: %s\n' "$transfer" "$remote"
-  else
-    printf '    %s\n' "$transfer"
-    printf '    Endpoint: %s\n' "$remote"
-  fi
+  case "$UI_MODE" in
+    compact|standard)
+      _sr_limit=$(( UI_COLS - ${#rowid} - ${#state} - 5 ))
+      [ "$_sr_limit" -ge 8 ] || _sr_limit=8
+      [ "$_sr_limit" -le 38 ] || _sr_limit=38
+      printf '%s. %s%.*s%s  %s%s%s\n' \
+        "$rowid" "$field_colour" "$_sr_limit" "$rowname" "${UI_RESET:-}" \
+        "$status_colour" "$state" "${UI_RESET:-}"
+      [ "${#rowname}" -le "$_sr_limit" ] || ui_full_name "$rowname"
+      if [ "$UI_MODE" = compact ]; then
+        printf '    VPN IPv4: %s%s%s\n' "$field_colour" "$rowip" "${UI_RESET:-}"
+        printf '    Last handshake: %s%s%s\n' "$field_colour" "$when" "${UI_RESET:-}"
+      else
+        printf '    IP: %s%s%s  |  Handshake: %s%s%s\n' \
+          "$field_colour" "$rowip" "${UI_RESET:-}" \
+          "$field_colour" "$when" "${UI_RESET:-}"
+      fi
+      ui_connection_detail "$transfer" "$remote"
+      ;;
+    full)
+      _sr_line_size=$(( 3 + 1 + 26 + 1 + 15 + 1 + 10 + 1 + 16 + 1 + ${#transfer} + 1 + ${#remote} ))
+      [ "${#transfer}" -ge 31 ] || _sr_line_size=$(( _sr_line_size + 31 - ${#transfer} ))
+      if [ "$_sr_line_size" -le "$UI_COLS" ]; then
+        printf '%-3.3s %s%-26.26s%s %s%-15.15s%s %s%-10.10s%s %s%-16.16s%s %-31s %s\n' \
+          "$rowid" "$field_colour" "$rowname" "${UI_RESET:-}" \
+          "$field_colour" "$rowip" "${UI_RESET:-}" \
+          "$status_colour" "$state" "${UI_RESET:-}" \
+          "$field_colour" "$when" "${UI_RESET:-}" "$transfer" "$remote"
+      else
+        printf '%-3.3s %s%-26.26s%s %s%-15.15s%s %s%-10.10s%s %s%s%s\n' \
+          "$rowid" "$field_colour" "$rowname" "${UI_RESET:-}" \
+          "$field_colour" "$rowip" "${UI_RESET:-}" \
+          "$status_colour" "$state" "${UI_RESET:-}" \
+          "$field_colour" "$when" "${UI_RESET:-}"
+        ui_connection_detail "$transfer" "$remote"
+      fi
+      [ "${#rowname}" -le 26 ] || ui_full_name "$rowname"
+      ;;
+    *)
+      printf '%-3.3s %s%-26.26s%s %s%-15.15s%s %s%-10.10s%s %s%s%s\n' \
+        "$rowid" "$field_colour" "$rowname" "${UI_RESET:-}" \
+        "$field_colour" "$rowip" "${UI_RESET:-}" \
+        "$status_colour" "$state" "${UI_RESET:-}" \
+        "$field_colour" "$when" "${UI_RESET:-}"
+      [ "${#rowname}" -le 26 ] || ui_full_name "$rowname"
+      ui_connection_detail "$transfer" "$remote"
+      ;;
+  esac
   ui_rule
 }
 show_connection_status() {
@@ -1298,25 +1435,46 @@ show_connection_status() {
     done
     [ "$found" = 1 ] || say '(none)'
   } > "$STATUS_EXTRA_RENDER" || return 1
-  ui_heading "Connection status — $IFACE (live + saved history)"
-  printf 'Clients: %s | Recent: %s | Idle: %s | Never: %s' \
-    "$count" "$STATUS_RECENT" "$STATUS_IDLE" "$STATUS_NEVER"
-  [ "$STATUS_DISABLED" -gt 0 ] && printf ' | Disabled: %s' "$STATUS_DISABLED"
-  [ "$STATUS_UNAVAILABLE" -gt 0 ] && printf ' | Unavailable: %s' "$STATUS_UNAVAILABLE"
-  printf '\n'
+  if [ "$UI_MODE" = compact ]; then
+    ui_heading "Connection status — $IFACE"
+    say 'Live + saved history'
+  else
+    ui_heading "Connection status — $IFACE (live + saved history)"
+  fi
+  if [ "$UI_COLS" -lt 96 ]; then
+    printf 'Clients: %s | Recent: %s | Idle: %s\n' "$count" "$STATUS_RECENT" "$STATUS_IDLE"
+    printf 'Never: %s\n' "$STATUS_NEVER"
+    [ "$STATUS_DISABLED" -gt 0 ] && printf 'Disabled: %s\n' "$STATUS_DISABLED"
+    [ "$STATUS_UNAVAILABLE" -gt 0 ] && printf 'Unavailable: %s\n' "$STATUS_UNAVAILABLE"
+  else
+    printf 'Clients: %s | Recent: %s | Idle: %s | Never: %s' \
+      "$count" "$STATUS_RECENT" "$STATUS_IDLE" "$STATUS_NEVER"
+    [ "$STATUS_DISABLED" -gt 0 ] && printf ' | Disabled: %s' "$STATUS_DISABLED"
+    [ "$STATUS_UNAVAILABLE" -gt 0 ] && printf ' | Unavailable: %s' "$STATUS_UNAVAILABLE"
+    printf '\n'
+  fi
   ui_rule
   cat "$STATUS_GUI_RENDER" "$STATUS_EXTRA_RENDER" || return 1
   printf '\n'
-  say 'Recent = live handshake within 3 minutes; idle = older live/saved handshake.'
-  [ "$STATUS_CUTOFF" -gt 0 ] && say 'After history clear, only newer handshakes are shown.'
-  say 'Status is approximate, not a guarantee of an active connection.'
-  say 'Endpoints and accumulated transfers survive router restarts.'
-  say 'History directory: /jffs/wg-manager/history/.'
-  say 'RX/TX: client perspective; accumulated since history tracking began.'
-  say 'Snapshots: every 5 minutes, at server stop and when this screen opens.'
+  if [ "$UI_MODE" = compact ]; then
+    say 'Recent: live handshake within 3m.'
+    say 'Idle: older live/saved handshake.'
+    [ "$STATUS_CUTOFF" -gt 0 ] && say 'Only post-clear handshakes shown.'
+    say 'Status is approximate, not live proof.'
+    say 'History survives router restarts.'
+  else
+    say 'Recent = live handshake within 3 minutes; idle = older live/saved handshake.'
+    [ "$STATUS_CUTOFF" -gt 0 ] && say 'After history clear, only newer handshakes are shown.'
+    say 'Status is approximate, not a guarantee of an active connection.'
+    say 'Endpoints and accumulated transfers survive router restarts.'
+    say 'History directory: /jffs/wg-manager/history/.'
+    say 'RX/TX: client perspective; accumulated since history tracking began.'
+    say 'Snapshots: every 5 minutes, at server stop and when this screen opens.'
+  fi
 }
 connection_status() {
   while :; do
+    ui_new_screen
     show_connection_status || return 1
     printf '\n'
     ui_menu_item 1 'Refresh connection status'
@@ -1334,9 +1492,10 @@ connection_status() {
           history_clear || { err 'Could not clear saved connection history.'; return 1; }
           say 'Saved history cleared. Pre-clear handshakes and endpoints are now hidden.'
           say 'New handshakes and traffic will be recorded from this point forward.'
+          ui_continue
         fi ;;
       m|M) return 2 ;;
-      *) err 'Select 1, 2 or m.' ;;
+      *) err 'Select 1, 2 or m.'; ui_continue ;;
     esac
   done
 }
@@ -1611,6 +1770,7 @@ restore_archive() {
 
 backup_restore_menu() {
   while :; do
+    ui_new_screen
     ui_heading 'Backup and restore (wgs1)'
     ui_menu_item 1 'Create backup archive'
     ui_menu_item 2 'Restore from backup archive'
@@ -1620,14 +1780,20 @@ backup_restore_menu() {
       2)
         say 'Available archives in the default directory:'
         for r_path in "$ARCHIVES"/*.tar.gz; do
-          [ -f "$r_path" ] && printf '  %s\n' "$r_path"
+          if [ -f "$r_path" ]; then
+            if [ "$UI_COLS" -lt 60 ]; then
+              ui_wrapped_field '  ' "${r_path##*/}" '    '
+            else
+              printf '  %s\n' "$r_path"
+            fi
+          fi
         done
         ask 'Absolute path to backup archive [m = menu]: '
         is_back "$ANSWER" && return 2
         case "$ANSWER" in /*) restore_archive "$ANSWER"; return $?;;
           *) err 'Enter an absolute archive path.'; return 1;; esac;;
       m|M) return 2;;
-      *) err 'Select 1, 2 or m.';;
+      *) err 'Select 1, 2 or m.'; ui_continue;;
     esac
   done
 }
@@ -1742,15 +1908,29 @@ update_version_line() {
   # We display one version in the banner; only the latest is a separate line.
   update_load_cache || :
   if [ -z "$UPDATE_LATEST" ]; then
-    printf 'Latest version:  Unavailable (check via option 7)\n'
+    if [ "$UI_MODE" = compact ]; then
+      printf 'Latest: Unavailable (use 7)\n'
+    else
+      printf 'Latest version:  Unavailable (check via option 7)\n'
+    fi
   elif update_newer "$UPDATE_LATEST" "$WG_MANAGER_VERSION"; then
-    printf 'Latest version:  %s  %s[Update available]%s\n' \
-      "$UPDATE_LATEST" "${UI_YELLOW:-}" "${UI_RESET:-}"
+    if [ "$UI_MODE" = compact ]; then
+      printf 'Latest: %s  %s[Update available]%s\n' "$UPDATE_LATEST" "${UI_YELLOW:-}" "${UI_RESET:-}"
+    else
+      printf 'Latest version:  %s  %s[Update available]%s\n' "$UPDATE_LATEST" "${UI_YELLOW:-}" "${UI_RESET:-}"
+    fi
   elif [ "$UPDATE_LATEST" = "$WG_MANAGER_VERSION" ]; then
-    printf 'Latest version:  %s  %s[Up to date]%s\n' \
-      "$UPDATE_LATEST" "${UI_GREEN:-}" "${UI_RESET:-}"
+    if [ "$UI_MODE" = compact ]; then
+      printf 'Latest: %s  %s[Up to date]%s\n' "$UPDATE_LATEST" "${UI_GREEN:-}" "${UI_RESET:-}"
+    else
+      printf 'Latest version:  %s  %s[Up to date]%s\n' "$UPDATE_LATEST" "${UI_GREEN:-}" "${UI_RESET:-}"
+    fi
   else
-    printf 'Latest version:  %s  (installed version is newer)\n' "$UPDATE_LATEST"
+    if [ "$UI_MODE" = compact ]; then
+      printf 'Latest: %s (installed newer)\n' "$UPDATE_LATEST"
+    else
+      printf 'Latest version:  %s  (installed version is newer)\n' "$UPDATE_LATEST"
+    fi
   fi
 }
 update_backup_current() {
@@ -1928,6 +2108,7 @@ update_rollback() {
 }
 update_menu() {
   while :; do
+    ui_new_screen
     ui_heading 'Update WG Manager'
     printf 'Installed: %s\n' "$WG_MANAGER_VERSION"
     update_version_line
@@ -1937,11 +2118,16 @@ update_menu() {
     ui_menu_item 3 'Roll back to a previous version'
     ask 'Select [1-3, m = menu]: '
     case "$ANSWER" in
-      1) if update_check y; then update_version_line; else warning 'Version check failed (offline or GitHub unavailable).'; fi ;;
-      2) update_install || : ;;
-      3) update_rollback || : ;;
+      1) if update_check y; then update_version_line; else warning 'Version check failed (offline or GitHub unavailable).'; fi
+         ui_continue ;;
+      2) update_install; _um_rc=$?
+         [ "$_um_rc" -eq 2 ] && return 2
+         ui_continue ;;
+      3) update_rollback; _um_rc=$?
+         [ "$_um_rc" -eq 2 ] && return 2
+         ui_continue ;;
       m|M) return 2 ;;
-      *) err 'Select 1, 2, 3 or m.' ;;
+      *) err 'Select 1, 2, 3 or m.'; ui_continue ;;
     esac
   done
 }
@@ -1962,15 +2148,31 @@ ui_init
 # cached for 12 hours, with a 30-minute backoff on network errors.
 while :; do
   update_check n || :
-  clear_screen
+  ui_new_screen
   printf '\n'
   ui_menu_rule
   printf '%sWG Manager v%s%s\n' "${UI_CYAN:-}" "$WG_MANAGER_VERSION" "${UI_RESET:-}"
   ui_menu_rule
-  printf 'Router:           %s\n' "$(nvram get productid)"
-  printf 'Firmware:         %s\n' "$(firmware_version)"
-  printf 'Server:           %s\n' "$IFACE"
-  printf 'Server VPN IPv4:  %s\n' "$SERVER_IP"
+  if [ "$UI_MODE" = compact ]; then
+    printf 'Router: %s\n' "$(nvram get productid)"
+  else
+    printf 'Router:           %s\n' "$(nvram get productid)"
+  fi
+  if [ "$UI_MODE" = compact ]; then
+    printf 'Firmware: %s\n' "$(firmware_version)"
+  else
+    printf 'Firmware:         %s\n' "$(firmware_version)"
+  fi
+  if [ "$UI_MODE" = compact ]; then
+    printf 'Server: %s\n' "$IFACE"
+  else
+    printf 'Server:           %s\n' "$IFACE"
+  fi
+  if [ "$UI_MODE" = compact ]; then
+    printf 'VPN IPv4: %s\n' "$SERVER_IP"
+  else
+    printf 'Server VPN IPv4:  %s\n' "$SERVER_IP"
+  fi
   printf '\n'
   update_version_line
   ui_menu_rule
@@ -1981,11 +2183,12 @@ while :; do
   ui_menu_item 5 'Connection status'
   printf '\n'
   ui_menu_item 6 'Backup and restore'
-  ui_menu_item 7 'Update WG Manager'
+  ui_menu_item 7 'Update'
   printf '\n'
   ui_menu_item 0 'Exit'
   ui_menu_rule
   ask 'Select [0-7]: '
+  case "$ANSWER" in 1|2|3|4|5|6|7) ui_new_screen;; esac
   case "$ANSWER" in
     1) show_config; rc=$?;;
     2) add_client; rc=$?;;
