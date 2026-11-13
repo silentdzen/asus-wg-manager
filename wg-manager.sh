@@ -1,5 +1,5 @@
 #!/bin/sh
-# ASUS WireGuard Client Manager v2.14.7 (detail and full-name alignment)
+# ASUS WireGuard Client Manager v2.14.8 (startup-only GitHub version check)
 # Manages ASUS WireGuard SERVER 1 (wgs1): GUI slots 1-10 + unlimited custom peers.
 # Requires /jffs/scripts support. Run locally on router as administrator/root.
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
@@ -14,7 +14,7 @@ export LC_ALL=C
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/opt/sbin${PATH:+:$PATH}
 export PATH
 # Bump this version for every published release. GitHub Actions reads it.
-WG_MANAGER_VERSION=2.14.7
+WG_MANAGER_VERSION=2.14.8
 # Project owner for release discovery (adjust only if repository owner differs).
 UPDATE_REPO=silentdzen/asus-wg-manager
 IFACE=wgs1
@@ -1936,8 +1936,8 @@ update_load_cache() {
   return 0
 }
 update_check() {
-  # A fresh check always re-fetches the manifest. For routine menu viewing,
-  # use the successful result for 12 hours and continue normally if offline.
+  # Forced checks (startup, manual check and installation) always fetch a
+  # fresh manifest. Non-forced calls may reuse a successful cached result.
   uc_force=${1:-n}
   update_load_cache || :
   uc_now=$(date +%s) || return 1
@@ -2213,10 +2213,13 @@ trap 'exit 130' 2
 trap 'exit 143' 15
 
 ui_init
-# Version checks only happen on the interactive menu. Successful results are
-# cached for 12 hours, with a 30-minute backoff on network errors.
+# Check GitHub once on each interactive launch, even if the previous cache
+# is fresh or a prior attempt failed. Hook/cron invocations exit above and do
+# not make network requests. Returning to the main menu never checks again;
+# the Update submenu still offers an explicit fresh check.
+# If offline, retain the last successfully cached version for display.
+update_check y || :
 while :; do
-  update_check n || :
   ui_new_screen
   printf '\n'
   ui_menu_rule
