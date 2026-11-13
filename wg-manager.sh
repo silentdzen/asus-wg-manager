@@ -1,5 +1,5 @@
 #!/bin/sh
-# ASUS WireGuard Client Manager v2.14.5 (responsive terminal interface)
+# ASUS WireGuard Client Manager v2.14.6 (compact status alignment fix)
 # Manages ASUS WireGuard SERVER 1 (wgs1): GUI slots 1-10 + unlimited custom peers.
 # Requires /jffs/scripts support. Run locally on router as administrator/root.
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
@@ -14,7 +14,7 @@ export LC_ALL=C
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/opt/sbin${PATH:+:$PATH}
 export PATH
 # Bump this version for every published release. GitHub Actions reads it.
-WG_MANAGER_VERSION=2.14.5
+WG_MANAGER_VERSION=2.14.6
 # Project owner for release discovery (adjust only if repository owner differs).
 UPDATE_REPO=silentdzen/asus-wg-manager
 IFACE=wgs1
@@ -191,13 +191,42 @@ ui_wrapped_field() {
 }
 ui_full_name() { ui_wrapped_field '    Full name: ' "$1" '      '; }
 # Render traffic and endpoint without horizontal overflow even with IPv6.
+# Compact mode uses a three-space indent so detail rows begin directly under
+# the client name (after the numeric ID and following space).
 ui_connection_detail() {
-  if [ $(( ${#1} + ${#2} + 19 )) -le "$UI_COLS" ]; then
+  if [ "$UI_MODE" = compact ]; then
+    if [ $(( ${#1} + ${#2} + 18 )) -le "$UI_COLS" ]; then
+      printf '   %s | Endpoint: %s\n' "$1" "$2"
+    else
+      ui_wrapped_field '   ' "$1" '   '
+      ui_wrapped_field '   Endpoint: ' "$2" '     '
+    fi
+  elif [ $(( ${#1} + ${#2} + 19 )) -le "$UI_COLS" ]; then
     printf '    %s | Endpoint: %s\n' "$1" "$2"
   else
     ui_wrapped_field '    ' "$1" '    '
     ui_wrapped_field '    Endpoint: ' "$2" '      '
   fi
+}
+# In the standard record layout, keep the IP and RX fields the same width.
+# This aligns the first | and the Handshake/TX columns across both lines.
+# Length calculations exclude ANSI colours, and long endpoints wrap safely.
+ui_connection_detail_aligned() {
+  case "$1" in
+    'RX: '*' | TX: '*)
+      _wgm_rx=${1%%' | TX: '*}
+      _wgm_tx=${1#*' | TX: '}
+      _wgm_first=$(printf '    %-21s |  TX: %s' "$_wgm_rx" "$_wgm_tx")
+      if [ $(( ${#_wgm_first} + ${#2} + 13 )) -le "$UI_COLS" ]; then
+        printf '%s | Endpoint: %s\n' "$_wgm_first" "$2"
+      else
+        printf '%s\n' "$_wgm_first"
+        ui_wrapped_field '    Endpoint: ' "$2" '      '
+      fi ;;
+    *)
+      ui_wrapped_field '    ' "$1" '    '
+      ui_wrapped_field '    Endpoint: ' "$2" '      ' ;;
+  esac
 }
 readfield() { sed -n "s/^$2=//p" "$1" 2>/dev/null | sed -n '1p'; }
 confval() { sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" 2>/dev/null | sed -n '1p'; }
@@ -1348,28 +1377,30 @@ status_row() {
         "$status_colour" "$state" "${UI_RESET:-}"
       [ "${#rowname}" -le "$_sr_limit" ] || ui_full_name "$rowname"
       if [ "$UI_MODE" = compact ]; then
-        printf '    VPN IPv4: %s%s%s\n' "$field_colour" "$rowip" "${UI_RESET:-}"
-        printf '    Last handshake: %s%s%s\n' "$field_colour" "$when" "${UI_RESET:-}"
+        # Detail rows begin directly under the client name on narrow screens.
+        printf '   IP: %s\n' "$rowip"
+        printf '   Last handshake: %s%s%s\n' "$field_colour" "$when" "${UI_RESET:-}"
+        ui_connection_detail "$transfer" "$remote"
       else
-        printf '    IP: %s%s%s  |  Handshake: %s%s%s\n' \
-          "$field_colour" "$rowip" "${UI_RESET:-}" \
-          "$field_colour" "$when" "${UI_RESET:-}"
+        # Fixed first-column width keeps the IP/RX and | positions aligned.
+        printf '    %-21s |  Handshake: %s%s%s\n' \
+          "IP: $rowip" "$field_colour" "$when" "${UI_RESET:-}"
+        ui_connection_detail_aligned "$transfer" "$remote"
       fi
-      ui_connection_detail "$transfer" "$remote"
       ;;
     full)
       _sr_line_size=$(( 3 + 1 + 26 + 1 + 15 + 1 + 10 + 1 + 16 + 1 + ${#transfer} + 1 + ${#remote} ))
       [ "${#transfer}" -ge 31 ] || _sr_line_size=$(( _sr_line_size + 31 - ${#transfer} ))
       if [ "$_sr_line_size" -le "$UI_COLS" ]; then
-        printf '%-3.3s %s%-26.26s%s %s%-15.15s%s %s%-10.10s%s %s%-16.16s%s %-31s %s\n' \
+        printf '%-3.3s %s%-26.26s%s %-15.15s %s%-10.10s%s %s%-16.16s%s %-31s %s\n' \
           "$rowid" "$field_colour" "$rowname" "${UI_RESET:-}" \
-          "$field_colour" "$rowip" "${UI_RESET:-}" \
+          "$rowip" \
           "$status_colour" "$state" "${UI_RESET:-}" \
           "$field_colour" "$when" "${UI_RESET:-}" "$transfer" "$remote"
       else
-        printf '%-3.3s %s%-26.26s%s %s%-15.15s%s %s%-10.10s%s %s%s%s\n' \
+        printf '%-3.3s %s%-26.26s%s %-15.15s %s%-10.10s%s %s%s%s\n' \
           "$rowid" "$field_colour" "$rowname" "${UI_RESET:-}" \
-          "$field_colour" "$rowip" "${UI_RESET:-}" \
+          "$rowip" \
           "$status_colour" "$state" "${UI_RESET:-}" \
           "$field_colour" "$when" "${UI_RESET:-}"
         ui_connection_detail "$transfer" "$remote"
@@ -1377,9 +1408,9 @@ status_row() {
       [ "${#rowname}" -le 26 ] || ui_full_name "$rowname"
       ;;
     *)
-      printf '%-3.3s %s%-26.26s%s %s%-15.15s%s %s%-10.10s%s %s%s%s\n' \
+      printf '%-3.3s %s%-26.26s%s %-15.15s %s%-10.10s%s %s%s%s\n' \
         "$rowid" "$field_colour" "$rowname" "${UI_RESET:-}" \
-        "$field_colour" "$rowip" "${UI_RESET:-}" \
+        "$rowip" \
         "$status_colour" "$state" "${UI_RESET:-}" \
         "$field_colour" "$when" "${UI_RESET:-}"
       [ "${#rowname}" -le 26 ] || ui_full_name "$rowname"
@@ -2181,10 +2212,8 @@ while :; do
   ui_menu_item 3 'Modify an existing client'
   ui_menu_item 4 'Delete a client'
   ui_menu_item 5 'Connection status'
-  printf '\n'
   ui_menu_item 6 'Backup and restore'
   ui_menu_item 7 'Update'
-  printf '\n'
   ui_menu_item 0 'Exit'
   ui_menu_rule
   ask 'Select [0-7]: '
