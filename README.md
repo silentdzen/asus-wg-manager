@@ -4,7 +4,7 @@ Manage ASUS WireGuard server `wgs1` peers beyond the 10 ASUS GUI client slots.
 The script supports client listing, add/modify/delete, LAN policies, connection
 history, backups and restores, and GitHub-release-based manual updates.
 
-**Current source release:** `v2.14.0`. Requires an enabled native ASUS WireGuard
+Requires an enabled native ASUS WireGuard
 server (`wgs1`), JFFS custom scripts and administrative shell access.
 
 ## Initial router installation (manual, once)
