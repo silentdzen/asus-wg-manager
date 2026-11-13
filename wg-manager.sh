@@ -1,5 +1,5 @@
 #!/bin/sh
-# ASUS WireGuard Client Manager v2.14.3 (submenu navigation refinement)
+# ASUS WireGuard Client Manager v2.14.4 (ASUS shell path compatibility fix)
 # Manages ASUS WireGuard SERVER 1 (wgs1): GUI slots 1-10 + unlimited custom peers.
 # Requires /jffs/scripts support. Run locally on router as administrator/root.
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
@@ -14,7 +14,7 @@ export LC_ALL=C
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/opt/sbin${PATH:+:$PATH}
 export PATH
 # Bump this version for every published release. GitHub Actions reads it.
-WG_MANAGER_VERSION=2.14.3
+WG_MANAGER_VERSION=2.14.4
 # Project owner for release discovery (adjust only if repository owner differs).
 UPDATE_REPO=silentdzen/asus-wg-manager
 IFACE=wgs1
@@ -1492,7 +1492,8 @@ restore_archive() {
   ' "$r_payload/nvram-wgs1.txt"; then
     err 'Invalid wgs1 NVRAM records in archive.'; rm -rf "$r_stage"; return 1
   fi
-  if ! sh -n "$r_payload/scripts/wg-manager.sh"; then
+  # ASUS /usr/sbin/sh is a memory utility, not the shell; use /bin/sh.
+  if ! /bin/sh -n "$r_payload/scripts/wg-manager.sh"; then
     err 'Manager script inside archive has invalid shell syntax.'; rm -rf "$r_stage"; return 1
   fi
   r_firmware=$(readfield "$r_payload/manifest" FIRMWARE)
@@ -1767,9 +1768,10 @@ update_apply_file() {
   ua_source=$1
   ua_dir="/jffs/scripts/.wg-manager-install.$$"
   (umask 077; mkdir "$ua_dir") || { err 'Cannot create update staging directory.'; return 1; }
+  # Always use /bin/sh for validation: /usr/sbin/sh may be an ASUS utility.
   if ! cp "$ua_source" "$ua_dir/wg-manager.sh" ||
      ! chmod 700 "$ua_dir/wg-manager.sh" ||
-     ! sh -n "$ua_dir/wg-manager.sh"; then
+     ! /bin/sh -n "$ua_dir/wg-manager.sh"; then
     rm -rf "$ua_dir"; return 1
   fi
   if ! mv "$ua_dir/wg-manager.sh" "$SELF"; then
@@ -1856,7 +1858,7 @@ update_install() {
     rm -rf "$ud_temp"; return 1
   fi
   ud_script_version=$(sed -n 's/^WG_MANAGER_VERSION=//p' "$ud_temp/wg-manager.sh" | sed -n '1p')
-  if [ "$ud_script_version" != "$UPDATE_LATEST" ] || ! sh -n "$ud_temp/wg-manager.sh"; then
+  if [ "$ud_script_version" != "$UPDATE_LATEST" ] || ! /bin/sh -n "$ud_temp/wg-manager.sh"; then
     err 'New script version or syntax verification failed.'
     rm -rf "$ud_temp"; return 1
   fi
@@ -1908,7 +1910,7 @@ update_rollback() {
   ur_path=$(awk -F '|' -v n="$ANSWER" '$1==n {print $2;exit}' "$UPDATE_BACKUP_INDEX")
   [ -f "$ur_path" ] || { err 'Backup not found.'; return 1; }
   ur_version=$(sed -n 's/^WG_MANAGER_VERSION=//p' "$ur_path" | sed -n '1p')
-  if ! valid_update_version "$ur_version" || ! sh -n "$ur_path"; then
+  if ! valid_update_version "$ur_version" || ! /bin/sh -n "$ur_path"; then
     err 'Backup is not a valid WG Manager version or has shell syntax errors.'
     return 1
   fi

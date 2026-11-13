@@ -116,7 +116,8 @@ actual=$(file_sha256 "$STAGE/wg-manager.sh") || fail 'No working SHA-256 verifie
 [ "$(grep -c '^WG_MANAGER_VERSION=' "$STAGE/wg-manager.sh")" -eq 1 ] || fail 'Unexpected script version declaration.'
 script_version=$(sed -n 's/^WG_MANAGER_VERSION=//p' "$STAGE/wg-manager.sh")
 [ "$script_version" = "$VERSION" ] || fail 'Script version does not match the release manifest.'
-sh -n "$STAGE/wg-manager.sh" || fail 'Script has shell syntax errors.'
+# /usr/sbin/sh on some ASUS routers is a memory utility, not a shell.
+/bin/sh -n "$STAGE/wg-manager.sh" || fail 'Script has shell syntax errors.'
 chmod 700 "$STAGE/wg-manager.sh" || fail 'Could not set script permissions.'
 
 [ ! -L "$DEST" ] || fail 'Installation target is a symbolic link; refusing to replace it.'

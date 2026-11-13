@@ -1,6 +1,5 @@
-WG Manager v2.14.3 — Changes
+WG Manager v2.14.4 — Changes
 
-- Connection status: removed the numbered return option; enter m to return to the main menu.
-- Backup and restore: removed the numbered return option; enter m to return to the main menu.
-- Update WG Manager: removed the numbered return option; enter m to return to the main menu.
-- Updated submenu prompts and invalid-choice messages to reflect the available options.
+- Fixed shell syntax checks on ASUS routers where `sh` resolves to a non-shell utility.
+- Use `/bin/sh -n` in installation, self-update, rollback, and backup restore validation.
+- Updated the README installation command to invoke `/bin/sh` explicitly.
