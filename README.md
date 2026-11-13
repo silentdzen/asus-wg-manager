@@ -16,7 +16,7 @@ administrator (use the SSH port you configured).
 Run this **single command on the router**:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/silentdzen/asus-wg-manager/main/install.sh -o /tmp/wg-manager-install.sh && sh /tmp/wg-manager-install.sh
+curl -fsSL https://raw.githubusercontent.com/silentdzen/asus-wg-manager/main/install.sh -o /tmp/wg-manager-install.sh && /bin/sh /tmp/wg-manager-install.sh
 ```
 
 The installer retrieves the latest **published GitHub Release**, verifies the
