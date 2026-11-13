@@ -5,10 +5,7 @@ The script supports client listing, add/modify/delete, LAN policies, connection
 history, backups and restores, and GitHub-release-based manual updates.
 
 **Current source release:** `v2.14.0`. Requires an enabled native ASUS WireGuard
-server (`wgs1`), JFFS custom scripts and administrative shell access. Tested
-syntactically with POSIX `sh` and BusyBox `ash` outside the router; live testing
-on your router is recommended. No Entware required; the updater needs `curl`
-and `sha256sum` from the firmware.
+server (`wgs1`), JFFS custom scripts and administrative shell access.
 
 ## Initial router installation (manual, once)
 
