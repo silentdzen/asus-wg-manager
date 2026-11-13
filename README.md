@@ -7,21 +7,36 @@ history, backups and restores, and GitHub-release-based manual updates.
 Requires an enabled native ASUS WireGuard
 server (`wgs1`), JFFS custom scripts and administrative shell access.
 
-## Initial router installation (manual, once)
+## Installation
 
-Upload the script as `wg-manager.sh` to `/jffs/wg-manager.sh`. SSH port 22 is used in the following example.
+Enable SSH access, **JFFS custom scripts**, and the native ASUS WireGuard
+server `wgs1` in your router's settings. Connect to the router over SSH as
+administrator (use the SSH port you configured).
 
-```sh
-scp -O -P 22 wg-manager.sh USERNAME@ROUTER_HOST:/jffs/wg-manager.sh
-```
-
-Then check its
-syntax, preserve a copy of the previous executable (if any) and move the new file into
-`/jffs/scripts/wg-manager.sh`. SSH port 22 is used in the following example.
+Run this **single command on the router**:
 
 ```sh
-ssh -p 22 USERNAME@ROUTER_HOST 'sh -n /jffs/wg-manager.sh && cp -p /jffs/scripts/wg-manager.sh /jffs/scripts/wg-manager.sh.bak && chmod 700 /jffs/wg-manager.sh && mv /jffs/wg-manager.sh /jffs/scripts/wg-manager.sh'
+curl -fsSL https://raw.githubusercontent.com/silentdzen/asus-wg-manager/main/install.sh -o /tmp/wg-manager-install.sh && sh /tmp/wg-manager-install.sh
 ```
+
+The installer retrieves the latest **published GitHub Release**, verifies the
+`update-info.txt` SHA-256 checksum (with standalone `sha256sum`, BusyBox or
+OpenSSL), checks syntax and version, and then installs
+`/jffs/scripts/wg-manager.sh`. If WG Manager is already installed, it creates
+a timestamped backup in `/jffs/wg-manager/backups/updates/` before replacement.
+Any download, verification or backup failure stops installation without
+replacing the current executable. It does not restart the WireGuard server or
+modify client keys, policies, or connection history.
+
+To start WG Manager after installation:
+
+```sh
+/jffs/scripts/wg-manager.sh
+```
+
+Future updates can be installed from **7) Update WG Manager** in the menu.
+The one-line command downloads and runs `install.sh` from this public repository
+with administrator privileges.
 
 ## Security and update behaviour
 
