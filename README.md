@@ -9,13 +9,15 @@ server (`wgs1`), JFFS custom scripts and administrative shell access.
 
 ## Initial router installation (manual, once)
 
-Upload the script as `wg-manager.sh` to `/jffs/wg-manager.sh`, then check its
-syntax, preserve a copy of the previous executable and move the new file into
-`/jffs/scripts/wg-manager.sh`. SSH port 22 is used in the following example.
+Upload the script as `wg-manager.sh` to `/jffs/wg-manager.sh`. SSH port 22 is used in the following example.
 
 ```sh
 scp -O -P 22 wg-manager.sh USERNAME@ROUTER_HOST:/jffs/wg-manager.sh
 ```
+
+Then check its
+syntax, preserve a copy of the previous executable (if any) and move the new file into
+`/jffs/scripts/wg-manager.sh`. SSH port 22 is used in the following example.
 
 ```sh
 ssh -p 22 USERNAME@ROUTER_HOST 'sh -n /jffs/wg-manager.sh && cp -p /jffs/scripts/wg-manager.sh /jffs/scripts/wg-manager.sh.bak && chmod 700 /jffs/wg-manager.sh && mv /jffs/wg-manager.sh /jffs/scripts/wg-manager.sh'
